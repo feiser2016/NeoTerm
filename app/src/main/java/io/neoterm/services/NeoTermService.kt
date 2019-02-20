@@ -13,6 +13,7 @@ import android.support.v4.app.NotificationCompat
 import io.neoterm.R
 import io.neoterm.backend.EmulatorDebug
 import io.neoterm.backend.TerminalSession
+import io.neoterm.frontend.logging.NLog
 import io.neoterm.frontend.session.shell.ShellParameter
 import io.neoterm.frontend.session.xorg.XParameter
 import io.neoterm.frontend.session.xorg.XSession
@@ -77,8 +78,7 @@ class NeoTermService : Service() {
         get() = mXSessions
 
     fun createTermSession(parameter: ShellParameter): TerminalSession {
-        val session = TerminalUtils.createSession(this, parameter)
-        mTerminalSessions.add(session)
+        val session = createOrFindSession(parameter)
         updateNotification()
         return session
     }
@@ -106,6 +106,24 @@ class NeoTermService : Service() {
             updateNotification()
         }
         return indexOfRemoved
+    }
+
+    private fun createOrFindSession(parameter: ShellParameter): TerminalSession {
+        if (parameter.willCreateNewSession()) {
+            NLog.d("createOrFindSession: creating new session")
+            val session = TerminalUtils.createSession(this, parameter)
+            mTerminalSessions.add(session)
+            return session
+        }
+
+        val sessionId = parameter.sessionId!!
+        NLog.d("createOrFindSession: find session by id $sessionId")
+
+        val session = mTerminalSessions.find { it.mHandle == sessionId.sessionId }
+                ?: throw IllegalArgumentException("cannot find session by given id")
+
+        session.write(parameter.initialCommand + "\n")
+        return session
     }
 
     private fun updateNotification() {
@@ -165,7 +183,8 @@ class NeoTermService : Service() {
     private fun acquireLock() {
         if (mWakeLock == null) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, EmulatorDebug.LOG_TAG)
+            mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                    EmulatorDebug.LOG_TAG + ":")
             mWakeLock!!.acquire()
 
             val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
